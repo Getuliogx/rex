@@ -1,0 +1,647 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Busca Universal Pro em ISO / Arquivos de Jogos</title>
+<style>
+:root{--bg:#0b0f16;--card:#121a26;--card2:#182233;--txt:#e8eef8;--muted:#9fb0c8;--ok:#59d38c;--bad:#ff6b6b;--warn:#ffd166;--line:#27364d}
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt)}
+header{padding:22px 16px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#121a26,#0b0f16)}
+main{max-width:1180px;margin:auto;padding:16px}
+h1{font-size:22px;margin:0 0 8px}
+p{color:var(--muted);line-height:1.45}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin:12px 0}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:850px){.row{grid-template-columns:1fr}}
+input,textarea,select,button{width:100%;border-radius:10px;border:1px solid var(--line);background:#0e1520;color:var(--txt);padding:11px;font-size:15px}
+textarea{min-height:76px;resize:vertical}
+button{cursor:pointer;background:#23324a;font-weight:bold}
+button:hover{background:#2d405e}
+button:disabled{opacity:.55;cursor:not-allowed}
+small,.hint{color:var(--muted)}
+.drop{border:2px dashed #3d5578;padding:22px;text-align:center;border-radius:14px;background:#0e1520}
+.drop.drag{border-color:var(--ok);background:#10251a}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}
+.chk{display:flex;gap:8px;align-items:center;background:#0e1520;border:1px solid var(--line);padding:8px;border-radius:10px}
+.chk input{width:auto}
+.progress{height:14px;background:#0e1520;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.bar{height:100%;width:0%;background:linear-gradient(90deg,#59d38c,#4aa3ff)}
+table{width:100%;border-collapse:collapse;margin-top:10px}
+th,td{border-bottom:1px solid var(--line);padding:8px;text-align:left;font-size:13px;vertical-align:top}
+th{color:#c7d5e8;background:#0e1520;position:sticky;top:0}
+code{background:#0e1520;border:1px solid var(--line);padding:2px 5px;border-radius:6px}
+.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}
+.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:3px 8px;color:var(--muted);font-size:12px;margin:2px}
+pre{white-space:pre-wrap;word-break:break-word;background:#0e1520;border:1px solid var(--line);padding:8px;border-radius:10px;max-height:160px;overflow:auto}
+hr{border:0;border-top:1px solid var(--line);margin:12px 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>Busca Universal Pro em ISO / Arquivos de Jogos</h1>
+  <p>Procura texto em arquivos normais, dados comprimidos comuns e criptografia simples. Tudo roda localmente no navegador; nada é enviado para servidor.</p>
+</header>
+<main>
+  <div class="card">
+    <div id="drop" class="drop">
+      <b>Arraste ISO / BIN / DAT / PAK / arquivos do jogo aqui</b><br>
+      <small>ou selecione abaixo. Arquivos muito grandes dependem da memória do navegador.</small>
+      <br><br>
+      <input id="files" type="file" multiple>
+    </div>
+    <p id="fileInfo" class="hint">Nenhum arquivo selecionado.</p>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <label>Texto para pesquisar</label>
+        <input id="query" placeholder="Ex: New Game, Continuar, Press Start, こんにちは">
+      </div>
+      <div>
+        <label>Máximo de resultados</label>
+        <input id="maxResults" type="number" value="1000" min="1" max="200000">
+      </div>
+    </div>
+    <br>
+    <div class="row">
+      <div>
+        <label>Tamanho do bloco de leitura</label>
+        <select id="chunkSize">
+          <option value="1048576">1 MB - mais compatível</option>
+          <option value="4194304" selected>4 MB - recomendado</option>
+          <option value="16777216">16 MB - mais rápido</option>
+          <option value="67108864">64 MB - pesado</option>
+        </select>
+      </div>
+      <div>
+        <label>Opções gerais</label>
+        <div class="grid">
+          <label class="chk"><input id="caseInsensitive" type="checkbox" checked> Ignorar maiúsculas/minúsculas</label>
+          <label class="chk"><input id="dedupe" type="checkbox" checked> Remover duplicados próximos</label>
+          <label class="chk"><input id="deepSmallFiles" type="checkbox" checked> Análise profunda em arquivos menores</label>
+          <label class="chk"><input id="scanIsoFiles" type="checkbox" checked> Tentar listar arquivos dentro de ISO 9660</label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <b>Codificações de texto</b>
+    <p class="hint">Esses formatos são testados direto nos bytes e também por decodificação.</p>
+    <div class="grid" id="modes"></div>
+  </div>
+
+  <div class="card">
+    <b>Compressão automática</b>
+    <p class="hint">Funciona para blocos/arquivos com assinatura ou formato reconhecível pelo navegador. Alguns formatos de jogos usam LZSS/LZ77/LZ4/custom sem cabeçalho; esses precisam de extrator específico.</p>
+    <div class="grid">
+      <label class="chk"><input id="tryGzip" type="checkbox" checked> Tentar GZIP</label>
+      <label class="chk"><input id="tryZlib" type="checkbox" checked> Tentar ZLIB/Deflate com cabeçalho</label>
+      <label class="chk"><input id="tryRawDeflate" type="checkbox" checked> Tentar Deflate bruto</label>
+      <label class="chk"><input id="tryZipEntries" type="checkbox" checked> Detectar entradas ZIP locais</label>
+      <label class="chk"><input id="scanCompressedWindows" type="checkbox" checked> Procurar blocos comprimidos dentro do arquivo</label>
+    </div>
+    <br>
+    <div class="row">
+      <div>
+        <label>Máximo para descompactar por tentativa</label>
+        <select id="maxDecompress">
+          <option value="1048576">1 MB</option>
+          <option value="4194304" selected>4 MB</option>
+          <option value="16777216">16 MB</option>
+          <option value="67108864">64 MB</option>
+        </select>
+      </div>
+      <div>
+        <label>Quantidade máxima de blocos comprimidos por arquivo</label>
+        <input id="maxCompressedBlocks" type="number" value="50" min="1" max="5000">
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <b>Criptografia / ofuscação simples</b>
+    <p class="hint">Isto tenta métodos simples comuns. Criptografia real AES/Blowfish/TEA/etc. sem chave não tem como descriptografar automaticamente.</p>
+    <div class="grid">
+      <label class="chk"><input id="tryXor1" type="checkbox" checked> XOR 1 byte - todas as chaves 00-FF</label>
+      <label class="chk"><input id="tryNot" type="checkbox" checked> NOT / inverter bits</label>
+      <label class="chk"><input id="tryAddSub" type="checkbox" checked> Soma/subtração 1 byte</label>
+      <label class="chk"><input id="tryReverse" type="checkbox"> Texto invertido</label>
+      <label class="chk"><input id="tryNibbleSwap" type="checkbox" checked> Troca de nibbles</label>
+    </div>
+    <br>
+    <div class="row">
+      <div>
+        <label>Modo de força para criptografia simples</label>
+        <select id="cryptoMode">
+          <option value="smart" selected>Smart - procura o padrão transformado, mais rápido</option>
+          <option value="decode_small">Decodificar blocos pequenos, mais pesado</option>
+        </select>
+      </div>
+      <div>
+        <label>Limite de arquivo para análise profunda de criptografia</label>
+        <select id="cryptoMaxFile">
+          <option value="1048576">1 MB</option>
+          <option value="4194304" selected>4 MB</option>
+          <option value="16777216">16 MB</option>
+          <option value="67108864">64 MB</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <b>Tabela própria opcional</b>
+    <p class="hint">Para jogos com tabela própria, cole linhas no formato <code>A=01</code>, <code>B=02</code>, <code>á=8A</code>. A busca criará um padrão de bytes usando essa tabela.</p>
+    <textarea id="customTable" placeholder="Exemplo:
+A=01
+B=02
+C=03
+ =00"></textarea>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <button id="start">Pesquisar</button>
+      <button id="stop" disabled>Parar</button>
+    </div>
+    <br>
+    <div class="progress"><div id="bar" class="bar"></div></div>
+    <p id="status" class="hint">Pronto.</p>
+    <div id="summary"></div>
+  </div>
+
+  <div class="card">
+    <b>Resultados</b>
+    <button id="exportCsv" disabled>Exportar CSV</button>
+    <div style="overflow:auto;max-height:620px">
+      <table>
+        <thead><tr><th>#</th><th>Arquivo/origem</th><th>Offset aprox.</th><th>Modo</th><th>Trecho</th></tr></thead>
+        <tbody id="results"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <b>Verdade sobre “todos os formatos”</b>
+    <p class="warn">Não existe ferramenta que leia todos os formatos, compressões e criptografias automaticamente. Jogos podem usar compressão própria, criptografia com chave, ponteiros, texto quebrado, imagens, scripts empacotados e tabelas customizadas. Esta versão tenta o máximo possível sem precisar instalar nada.</p>
+  </div>
+</main>
+
+<script>
+const modeDefs = [
+  ["utf8_bytes","UTF-8 bytes exato"],
+  ["ascii_bytes","ASCII/Latin simples bytes"],
+  ["latin1_bytes","Latin-1/Windows bytes"],
+  ["utf16le_bytes","UTF-16 LE bytes"],
+  ["utf16be_bytes","UTF-16 BE bytes"],
+  ["utf32le_bytes","UTF-32 LE bytes"],
+  ["utf32be_bytes","UTF-32 BE bytes"],
+  ["zero_between","ASCII com 00 entre letras"],
+  ["decoder_utf8","Decodificar como UTF-8"],
+  ["decoder_utf16le","Decodificar como UTF-16 LE"],
+  ["decoder_utf16be","Decodificar como UTF-16 BE"],
+  ["decoder_1252","Decodificar como Windows-1252"],
+  ["decoder_latin1","Decodificar como ISO-8859-1"],
+  ["decoder_sjis","Decodificar como Shift-JIS"],
+  ["decoder_eucjp","Decodificar como EUC-JP"],
+  ["decoder_gbk","Decodificar como GBK/Chinês"],
+  ["decoder_big5","Decodificar como Big5"],
+  ["decoder_euckr","Decodificar como EUC-KR/Coreano"],
+  ["custom_table","Tabela própria"]
+];
+
+const modesBox = document.getElementById("modes");
+for (const [id,label] of modeDefs) {
+  const lab = document.createElement("label");
+  lab.className = "chk";
+  lab.innerHTML = `<input type="checkbox" id="${id}" checked> ${label}`;
+  modesBox.appendChild(lab);
+}
+
+const $ = id => document.getElementById(id);
+let stopFlag = false;
+let allResults = [];
+
+function fmtSize(n){
+  const u=["B","KB","MB","GB"]; let i=0;
+  while(n>=1024 && i<u.length-1){n/=1024;i++}
+  return n.toFixed(i?2:0)+" "+u[i];
+}
+function hex(n){ return "0x"+Math.max(0,n).toString(16).toUpperCase().padStart(8,"0"); }
+function escapeCsv(v){ return '"' + String(v).replaceAll('"','""') + '"'; }
+function esc(s){ return String(s).replace(/[&<>]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[m])); }
+
+function updateFileInfo(){
+  const files = [...$("files").files];
+  if(!files.length){ $("fileInfo").textContent="Nenhum arquivo selecionado."; return; }
+  const total = files.reduce((a,f)=>a+f.size,0);
+  $("fileInfo").innerHTML = files.map(f=>`<span class="pill">${esc(f.name)} — ${fmtSize(f.size)}</span>`).join(" ") + `<br>Total: ${fmtSize(total)}`;
+}
+$("files").addEventListener("change", updateFileInfo);
+const drop = $("drop");
+drop.addEventListener("dragover", e => {e.preventDefault(); drop.classList.add("drag");});
+drop.addEventListener("dragleave", () => drop.classList.remove("drag"));
+drop.addEventListener("drop", e => {
+  e.preventDefault(); drop.classList.remove("drag");
+  $("files").files = e.dataTransfer.files;
+  updateFileInfo();
+});
+
+function toUtf8Bytes(s){ return new TextEncoder().encode(s); }
+function toAsciiBytes(s){ const a=new Uint8Array(s.length); for(let i=0;i<s.length;i++) a[i]=s.charCodeAt(i)&255; return a; }
+function toUtf16LE(s){ const a=new Uint8Array(s.length*2); for(let i=0;i<s.length;i++){ const c=s.charCodeAt(i); a[i*2]=c&255; a[i*2+1]=c>>8; } return a; }
+function toUtf16BE(s){ const a=new Uint8Array(s.length*2); for(let i=0;i<s.length;i++){ const c=s.charCodeAt(i); a[i*2]=c>>8; a[i*2+1]=c&255; } return a; }
+function toUtf32LE(s){ const cps=[...s].map(ch=>ch.codePointAt(0)); const a=new Uint8Array(cps.length*4); cps.forEach((c,i)=>{a[i*4]=c&255;a[i*4+1]=(c>>8)&255;a[i*4+2]=(c>>16)&255;a[i*4+3]=(c>>24)&255;}); return a; }
+function toUtf32BE(s){ const cps=[...s].map(ch=>ch.codePointAt(0)); const a=new Uint8Array(cps.length*4); cps.forEach((c,i)=>{a[i*4]=(c>>24)&255;a[i*4+1]=(c>>16)&255;a[i*4+2]=(c>>8)&255;a[i*4+3]=c&255;}); return a; }
+function toZeroBetween(s){ const a=new Uint8Array(s.length*2-1); for(let i=0;i<s.length;i++){a[i*2]=s.charCodeAt(i)&255;if(i<s.length-1)a[i*2+1]=0;} return a; }
+function reverseString(s){ return [...s].reverse().join(""); }
+
+function parseCustomTable(text, query){
+  const map = new Map();
+  for(const line of text.split(/\r?\n/)){
+    const clean=line.trim();
+    if(!clean || clean.startsWith("#")) continue;
+    const eq=clean.indexOf("=");
+    if(eq<0) continue;
+    const k=clean.slice(0,eq);
+    const hexs=clean.slice(eq+1).replace(/[^0-9a-fA-F]/g,"");
+    if(k && hexs.length>=2 && hexs.length%2===0){
+      const bytes=[];
+      for(let i=0;i<hexs.length;i+=2) bytes.push(parseInt(hexs.slice(i,i+2),16));
+      map.set(k, bytes);
+    }
+  }
+  if(!map.size) return null;
+  const out=[];
+  for(const ch of [...query]){
+    if(!map.has(ch)) return null;
+    out.push(...map.get(ch));
+  }
+  return new Uint8Array(out);
+}
+
+function buildBytePatterns(q){
+  const patterns = [];
+  const ci = $("caseInsensitive").checked;
+  const vars = ci ? [...new Set([q,q.toLowerCase(),q.toUpperCase()])] : [q];
+  if($("tryReverse").checked) {
+    const add = vars.map(reverseString);
+    for(const v of add) if(!vars.includes(v)) vars.push(v);
+  }
+  const add = (name, bytes) => { if(bytes && bytes.length) patterns.push({name, bytes}); };
+  for(const v of vars){
+    if($("utf8_bytes").checked) add("UTF-8 bytes", toUtf8Bytes(v));
+    if($("ascii_bytes").checked) add("ASCII bytes", toAsciiBytes(v));
+    if($("latin1_bytes").checked) add("Latin-1 bytes", toAsciiBytes(v));
+    if($("utf16le_bytes").checked) add("UTF-16 LE bytes", toUtf16LE(v));
+    if($("utf16be_bytes").checked) add("UTF-16 BE bytes", toUtf16BE(v));
+    if($("utf32le_bytes").checked) add("UTF-32 LE bytes", toUtf32LE(v));
+    if($("utf32be_bytes").checked) add("UTF-32 BE bytes", toUtf32BE(v));
+    if($("zero_between").checked && v.length>1) add("ASCII 00 entre letras", toZeroBetween(v));
+    if($("custom_table").checked) add("Tabela própria", parseCustomTable($("customTable").value, v));
+  }
+  return patterns;
+}
+
+function makeKmpTable(pat){
+  const lps=new Int32Array(pat.length); let len=0, i=1;
+  while(i<pat.length){ if(pat[i]===pat[len]) lps[i++]=++len; else if(len) len=lps[len-1]; else lps[i++]=0; }
+  return lps;
+}
+function kmpSearch(buf, pat, lps, startOffset, onHit){
+  let i=0,j=0;
+  while(i<buf.length){
+    if(buf[i]===pat[j]){ i++; j++; if(j===pat.length){ onHit(startOffset+i-j); j=lps[j-1]; } }
+    else if(j) j=lps[j-1]; else i++;
+  }
+}
+function concatTail(tail, chunk){
+  if(!tail || !tail.length) return chunk;
+  const out = new Uint8Array(tail.length + chunk.length);
+  out.set(tail,0); out.set(chunk,tail.length);
+  return out;
+}
+function bytesPreview(bytes, pos, len){
+  const s=Math.max(0,pos-48), e=Math.min(bytes.length,pos+len+64);
+  const cut=bytes.slice(s,e);
+  let txt="";
+  try{ txt=new TextDecoder("utf-8",{fatal:false}).decode(cut); }catch(e){}
+  txt=txt.replace(/[^\x20-\x7EÀ-ÿぁ-んァ-ヶ一-龯가-힣]/g,".");
+  const hx=[...cut.slice(0,128)].map(b=>b.toString(16).padStart(2,"0").toUpperCase()).join(" ");
+  return (txt.trim()?txt+"\n":"") + hx + (cut.length>128?" ...":"");
+}
+
+const decoderModes = [
+  ["decoder_utf8","utf-8","UTF-8 decode"],
+  ["decoder_utf16le","utf-16le","UTF-16 LE decode"],
+  ["decoder_utf16be","utf-16be","UTF-16 BE decode"],
+  ["decoder_1252","windows-1252","Windows-1252 decode"],
+  ["decoder_latin1","iso-8859-1","ISO-8859-1 decode"],
+  ["decoder_sjis","shift_jis","Shift-JIS decode"],
+  ["decoder_eucjp","euc-jp","EUC-JP decode"],
+  ["decoder_gbk","gbk","GBK decode"],
+  ["decoder_big5","big5","Big5 decode"],
+  ["decoder_euckr","euc-kr","EUC-KR decode"],
+];
+function availableDecoders(){
+  const out=[];
+  for(const [id,enc,name] of decoderModes){
+    if(!$(id).checked) continue;
+    try{ new TextDecoder(enc); out.push({enc,name}); }catch(e){}
+  }
+  return out;
+}
+
+function addResult(origin, offset, mode, preview){
+  const max=parseInt($("maxResults").value||"1000",10);
+  if(allResults.length>=max) return false;
+  if($("dedupe").checked){
+    const near=allResults.some(r => r.origin===origin && r.mode===mode && Math.abs(r.offset-offset)<8);
+    if(near) return true;
+  }
+  allResults.push({origin, offset, mode, preview});
+  const tr=document.createElement("tr");
+  tr.innerHTML = `<td>${allResults.length}</td><td>${esc(origin)}</td><td><code>${hex(offset)}</code><br>${Math.max(0,offset)}</td><td>${esc(mode)}</td><td><pre>${esc(preview)}</pre></td>`;
+  $("results").appendChild(tr);
+  return allResults.length < max;
+}
+
+function transformPattern(pattern, type, key=0){
+  const out=new Uint8Array(pattern.length);
+  for(let i=0;i<pattern.length;i++){
+    const b=pattern[i];
+    if(type==="xor") out[i]=b^key;
+    else if(type==="not") out[i]=(~b)&255;
+    else if(type==="add") out[i]=(b+key)&255;
+    else if(type==="sub") out[i]=(b-key)&255;
+    else if(type==="nibble") out[i]=((b&15)<<4)|((b>>4)&15);
+  }
+  return out;
+}
+
+function buildCryptoPatterns(basePatterns){
+  const out=[];
+  if($("tryNot").checked){
+    for(const p of basePatterns) out.push({name:p.name+" + NOT", bytes:transformPattern(p.bytes,"not")});
+  }
+  if($("tryNibbleSwap").checked){
+    for(const p of basePatterns) out.push({name:p.name+" + nibble swap", bytes:transformPattern(p.bytes,"nibble")});
+  }
+  if($("tryXor1").checked){
+    for(const p of basePatterns){
+      for(let k=0;k<256;k++) out.push({name:p.name+" + XOR key "+k.toString(16).padStart(2,"0").toUpperCase(), bytes:transformPattern(p.bytes,"xor",k)});
+    }
+  }
+  if($("tryAddSub").checked){
+    for(const p of basePatterns){
+      for(let k=1;k<256;k++){
+        out.push({name:p.name+" + ADD key "+k.toString(16).padStart(2,"0").toUpperCase(), bytes:transformPattern(p.bytes,"add",k)});
+        out.push({name:p.name+" + SUB key "+k.toString(16).padStart(2,"0").toUpperCase(), bytes:transformPattern(p.bytes,"sub",k)});
+      }
+    }
+  }
+  return out;
+}
+
+async function scanBuffer(origin, buf, baseOffset, bytePatterns, decoders, extraMode=""){
+  const compiled = bytePatterns.map(p=>({...p,lps:makeKmpTable(p.bytes)}));
+  for(const p of compiled){
+    if(stopFlag) return;
+    kmpSearch(buf, p.bytes, p.lps, baseOffset, off => {
+      const local = Math.max(0,off-baseOffset);
+      addResult(origin, off, (extraMode?extraMode+" / ":"")+p.name, bytesPreview(buf, local, p.bytes.length));
+    });
+    if(allResults.length >= parseInt($("maxResults").value||"1000",10)) return;
+  }
+  const q = $("caseInsensitive").checked ? $("query").value.toLowerCase() : $("query").value;
+  for(const d of decoders){
+    if(stopFlag) return;
+    let text="";
+    try{text=new TextDecoder(d.enc,{fatal:false}).decode(buf);}catch(e){continue;}
+    const hay=$("caseInsensitive").checked?text.toLowerCase():text;
+    let idx=hay.indexOf(q);
+    while(idx>=0){
+      const approx=baseOffset+Math.floor((idx/Math.max(1,text.length))*buf.length);
+      const snippet=text.slice(Math.max(0,idx-70), idx+q.length+90).replace(/\u0000/g,"·");
+      if(!addResult(origin, approx, (extraMode?extraMode+" / ":"")+d.name+" offset aproximado", snippet)) return;
+      idx=hay.indexOf(q, idx+Math.max(1,q.length));
+    }
+  }
+}
+
+async function scanFileStreaming(file, bytePatterns, decoders, totalDoneBefore, totalSize){
+  const chunkSize=parseInt($("chunkSize").value,10);
+  const maxPat=Math.max(16,...bytePatterns.map(p=>p.bytes.length),4096);
+  const overlap=Math.min(1024*1024,Math.max(maxPat+256,8192));
+  const compiled=bytePatterns.map(p=>({...p,lps:makeKmpTable(p.bytes)}));
+  let pos=0, tail=new Uint8Array(0);
+  while(pos<file.size && !stopFlag){
+    const end=Math.min(file.size,pos+chunkSize);
+    const raw=new Uint8Array(await file.slice(pos,end).arrayBuffer());
+    const buf=concatTail(tail,raw);
+    const bufStart=pos-tail.length;
+    for(const p of compiled){
+      kmpSearch(buf,p.bytes,p.lps,bufStart,off=>{
+        const local=Math.max(0,off-bufStart);
+        addResult(file.name,off,p.name,bytesPreview(buf,local,p.bytes.length));
+      });
+      if(allResults.length>=parseInt($("maxResults").value||"1000",10)) return;
+    }
+    const q=$("caseInsensitive").checked?$("query").value.toLowerCase():$("query").value;
+    for(const d of decoders){
+      let text="";
+      try{text=new TextDecoder(d.enc,{fatal:false}).decode(buf);}catch(e){continue;}
+      const hay=$("caseInsensitive").checked?text.toLowerCase():text;
+      let idx=hay.indexOf(q);
+      while(idx>=0){
+        const approx=bufStart+Math.floor((idx/Math.max(1,text.length))*buf.length);
+        const snippet=text.slice(Math.max(0,idx-70),idx+q.length+90).replace(/\u0000/g,"·");
+        if(!addResult(file.name,approx,d.name+" offset aproximado",snippet)) return;
+        idx=hay.indexOf(q,idx+Math.max(1,q.length));
+      }
+    }
+    tail=buf.slice(Math.max(0,buf.length-overlap));
+    pos=end;
+    const done=totalDoneBefore+pos;
+    $("bar").style.width=Math.min(100,done/totalSize*100).toFixed(2)+"%";
+    $("status").textContent=`Lendo ${file.name}: ${fmtSize(pos)} / ${fmtSize(file.size)} — resultados: ${allResults.length}`;
+    await new Promise(r=>setTimeout(r,0));
+  }
+}
+
+async function blobToArrayBuffer(blob){ return await blob.arrayBuffer(); }
+
+async function decompressBytes(bytes, format){
+  if(!("DecompressionStream" in window)) throw new Error("Seu navegador não suporta DecompressionStream");
+  const ds = new DecompressionStream(format);
+  const stream = new Blob([bytes]).stream().pipeThrough(ds);
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+function findSignatures(buf){
+  const sigs=[];
+  const maxBlocks=parseInt($("maxCompressedBlocks").value||"50",10);
+  for(let i=0;i<buf.length-4 && sigs.length<maxBlocks;i++){
+    if($("tryGzip").checked && buf[i]===0x1F && buf[i+1]===0x8B && buf[i+2]===0x08) sigs.push({off:i,type:"gzip",format:"gzip"});
+    if($("tryZlib").checked && buf[i]===0x78 && [0x01,0x5E,0x9C,0xDA].includes(buf[i+1])) sigs.push({off:i,type:"zlib",format:"deflate"});
+    if($("tryZipEntries").checked && buf[i]===0x50 && buf[i+1]===0x4B && buf[i+2]===0x03 && buf[i+3]===0x04) sigs.push({off:i,type:"zip-local",format:"zip"});
+  }
+  return sigs;
+}
+
+async function scanCompressed(file, bytePatterns, decoders){
+  if(!$("scanCompressedWindows").checked) return;
+  const maxDec=parseInt($("maxDecompress").value,10);
+  const smallLimit = Math.min(file.size, parseInt($("cryptoMaxFile").value,10));
+  const head = new Uint8Array(await file.slice(0, smallLimit).arrayBuffer());
+  const sigs=findSignatures(head);
+
+  for(const s of sigs){
+    if(stopFlag) return;
+    $("status").textContent=`Tentando descompactar ${file.name} em ${hex(s.off)} (${s.type})...`;
+    try{
+      if(s.type==="zip-local") {
+        const b=head;
+        const off=s.off;
+        if(off+30>=b.length) continue;
+        const method=b[off+8] | (b[off+9]<<8);
+        const compSize=(b[off+18])|(b[off+19]<<8)|(b[off+20]<<16)|(b[off+21]<<24);
+        const nameLen=b[off+26]|(b[off+27]<<8);
+        const extraLen=b[off+28]|(b[off+29]<<8);
+        const dataOff=off+30+nameLen+extraLen;
+        const name=new TextDecoder("utf-8",{fatal:false}).decode(b.slice(off+30,off+30+nameLen));
+        if(dataOff<0 || dataOff>=b.length || compSize<=0) continue;
+        const comp=b.slice(dataOff, Math.min(b.length, dataOff+Math.min(compSize,maxDec)));
+        let out=null;
+        if(method===0) out=comp;
+        else if(method===8) out=await decompressBytes(comp,"deflate-raw");
+        if(out) await scanBuffer(file.name+" :: ZIP:"+name, out, 0, bytePatterns, decoders, "descompactado ZIP");
+      } else {
+        const slice=head.slice(s.off, Math.min(head.length, s.off+maxDec));
+        const out=await decompressBytes(slice, s.format);
+        await scanBuffer(file.name+" :: "+s.type+" @ "+hex(s.off), out, 0, bytePatterns, decoders, "descompactado "+s.type);
+      }
+    } catch(e) {}
+    await new Promise(r=>setTimeout(r,0));
+  }
+}
+
+function tryParseIso9660(buf){
+  const files=[];
+  function readStr(off,len){ return new TextDecoder("ascii",{fatal:false}).decode(buf.slice(off,off+len)); }
+  const sector=2048;
+  const pvd=16*sector;
+  if(buf.length < pvd+sector) return files;
+  if(readStr(pvd+1,5)!=="CD001") return files;
+  const rootOff=pvd+156;
+  const extent=buf[rootOff+2]|(buf[rootOff+3]<<8)|(buf[rootOff+4]<<16)|(buf[rootOff+5]<<24);
+  const size=buf[rootOff+10]|(buf[rootOff+11]<<8)|(buf[rootOff+12]<<16)|(buf[rootOff+13]<<24);
+  const dirStart=extent*sector;
+  const dirEnd=Math.min(buf.length,dirStart+size);
+  let p=dirStart;
+  while(p<dirEnd){
+    const len=buf[p];
+    if(len===0){ p=(Math.floor(p/sector)+1)*sector; continue; }
+    if(p+len>buf.length) break;
+    const ex=buf[p+2]|(buf[p+3]<<8)|(buf[p+4]<<16)|(buf[p+5]<<24);
+    const sz=buf[p+10]|(buf[p+11]<<8)|(buf[p+12]<<16)|(buf[p+13]<<24);
+    const flags=buf[p+25];
+    const nlen=buf[p+32];
+    let name=readStr(p+33,nlen).replace(/;1$/,"");
+    if(name && name!=="\x00" && name!=="\x01" && !(flags&2)) files.push({name,off:ex*sector,size:sz});
+    p+=len;
+    if(files.length>5000) break;
+  }
+  return files;
+}
+
+async function scanIsoEntries(file, bytePatterns, decoders){
+  if(!$("scanIsoFiles").checked || file.size > 900*1024*1024) return;
+  try{
+    const buf=new Uint8Array(await file.arrayBuffer());
+    const entries=tryParseIso9660(buf);
+    if(!entries.length) return;
+    $("summary").innerHTML += `<p>ISO 9660 detectado em <b>${esc(file.name)}</b>: ${entries.length} entrada(s) no diretório raiz.</p>`;
+    for(const ent of entries){
+      if(stopFlag) return;
+      const max = $("deepSmallFiles").checked ? 64*1024*1024 : 8*1024*1024;
+      if(ent.size<=0 || ent.size>max) continue;
+      const part=buf.slice(ent.off, Math.min(buf.length, ent.off+ent.size));
+      await scanBuffer(file.name+" :: ISO:"+ent.name, part, ent.off, bytePatterns, decoders, "arquivo dentro da ISO");
+      await new Promise(r=>setTimeout(r,0));
+    }
+  }catch(e){}
+}
+
+async function scanCryptoSimple(file, basePatterns, decoders){
+  if(file.size > parseInt($("cryptoMaxFile").value,10) && !$("deepSmallFiles").checked) return;
+  const limit=Math.min(file.size, parseInt($("cryptoMaxFile").value,10));
+  const buf=new Uint8Array(await file.slice(0,limit).arrayBuffer());
+  const cryptoPatterns=buildCryptoPatterns(basePatterns);
+  if(!cryptoPatterns.length) return;
+  $("status").textContent=`Testando criptografia/ofuscação simples em ${file.name}...`;
+  const batch=400;
+  for(let i=0;i<cryptoPatterns.length && !stopFlag;i+=batch){
+    await scanBuffer(file.name, buf, 0, cryptoPatterns.slice(i,i+batch), [], "ofuscação simples");
+    await new Promise(r=>setTimeout(r,0));
+  }
+}
+
+$("stop").addEventListener("click",()=>{stopFlag=true;$("status").textContent="Parando...";});
+
+$("start").addEventListener("click", async ()=>{
+  const files=[...$("files").files];
+  const q=$("query").value;
+  if(!files.length){ alert("Selecione pelo menos um arquivo."); return; }
+  if(!q){ alert("Digite o texto para pesquisar."); return; }
+
+  stopFlag=false; allResults=[]; $("results").innerHTML=""; $("summary").innerHTML="";
+  $("start").disabled=true; $("stop").disabled=false; $("exportCsv").disabled=true; $("bar").style.width="0%";
+
+  const bytePatterns=buildBytePatterns(q);
+  const decoders=availableDecoders();
+  if(!bytePatterns.length && !decoders.length){ alert("Ative pelo menos um formato de busca."); $("start").disabled=false; $("stop").disabled=true; return; }
+
+  const totalSize=files.reduce((a,f)=>a+f.size,0);
+  let doneBefore=0;
+  try{
+    for(const file of files){
+      if(stopFlag) break;
+      await scanFileStreaming(file, bytePatterns, decoders, doneBefore, totalSize);
+      if(stopFlag) break;
+      await scanCompressed(file, bytePatterns, decoders);
+      if(stopFlag) break;
+      await scanCryptoSimple(file, bytePatterns, decoders);
+      if(stopFlag) break;
+      await scanIsoEntries(file, bytePatterns, decoders);
+      doneBefore += file.size;
+    }
+    $("status").innerHTML = stopFlag ? `<span class="bad">Busca interrompida.</span>` : `<span class="ok">Busca finalizada.</span>`;
+    $("summary").innerHTML += `<p><b>${allResults.length}</b> resultado(s). Testado: texto normal, decodificadores, compressão comum e ofuscação simples.</p>`;
+    if(allResults.length) $("exportCsv").disabled=false;
+  }catch(e){
+    console.error(e);
+    $("status").innerHTML = `<span class="bad">Erro:</span> ${esc(e.message)}`;
+  }finally{
+    $("start").disabled=false; $("stop").disabled=true;
+  }
+});
+
+$("exportCsv").addEventListener("click",()=>{
+  const rows=[["origem","offset_decimal","offset_hex","modo","trecho"], ...allResults.map(r=>[r.origin,r.offset,hex(r.offset),r.mode,r.preview])];
+  const csv=rows.map(r=>r.map(escapeCsv).join(",")).join("\n");
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="resultados_busca_iso_pro.csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+updateFileInfo();
+</script>
+</body>
+</html>
